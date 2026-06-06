@@ -197,23 +197,31 @@ function handleDeviceBye(usn) {
 
 // Start SSDP client
 const RENDERER_ST = 'urn:schemas-upnp-org:device:MediaRenderer:1';
-const ssdpClient = new Client({});
+console.log(`[Discovery] Initializing SSDP client bound to interface: ${SERVER_IP}`);
+const ssdpClient = new Client({
+    interfaces: [SERVER_IP],
+    explicitSocketBind: true
+});
 
 ssdpClient.on('response', (headers, statusCode, rinfo) => {
     if (headers.LOCATION) {
+        console.log(`[Discovery] Received SSDP search response from ${rinfo.address} (${headers.LOCATION})`);
         handleDevice(headers.LOCATION);
     }
 });
 
 ssdpClient.on('notify', (headers) => {
+    console.log(`[Discovery] Received SSDP notify NT=${headers.NT} NTS=${headers.NTS}`);
     if (headers.NT === RENDERER_ST) {
         if (headers.NTS === 'ssdp:alive' && headers.LOCATION) {
+            console.log(`[Discovery] Device alive notify from: ${headers.LOCATION}`);
             handleDevice(headers.LOCATION);
         } else if (headers.NTS === 'ssdp:byebye' && headers.USN) {
             handleDeviceBye(headers.USN);
         }
     }
 });
+
 
 // Perform initial search
 console.log(`[Discovery] Starting SSDP discovery for ${RENDERER_ST}...`);
