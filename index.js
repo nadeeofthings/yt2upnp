@@ -147,11 +147,15 @@ async function handleDevice(location) {
         const friendlyName = friendlyNameMatch ? friendlyNameMatch[1] : '';
         const udn = udnMatch ? udnMatch[1] : '';
 
-        // We only care about MediaRenderer devices
-        if (!deviceType.includes('MediaRenderer')) {
+        console.log(`[Discovery] Fetched description XML. Parsed: name="${friendlyName}", type="${deviceType}", udn="${udn}"`);
+
+        // We care about MediaRenderer and Sonos ZonePlayer devices
+        if (!deviceType.includes('MediaRenderer') && !deviceType.includes('ZonePlayer')) {
+            console.log(`[Discovery] Ignoring device "${friendlyName}" because deviceType "${deviceType}" is not a MediaRenderer or ZonePlayer.`);
             processedLocations.delete(location);
             return;
         }
+
 
         if (!udn || !friendlyName) {
             processedLocations.delete(location);
