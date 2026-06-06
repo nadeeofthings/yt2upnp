@@ -481,8 +481,10 @@ class SonosRendererBridge {
 
         // Initialize the YouTubeCastReceiver
         this.receiver = new YouTubeCastReceiver(this.player, {
-            name: friendlyName,
-            screenName: friendlyName,
+            device: {
+                name: friendlyName,
+                screenName: friendlyName
+            },
             port: receiverPort,
             dataStore: this.dataStore
         });

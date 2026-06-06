@@ -173,13 +173,15 @@ async function handleDevice(location) {
         const response = await axios.get(location, { timeout: 5000 });
         const xml = response.data;
 
-        // Parse friendlyName, UDN, and deviceType using RegExp
+        // Parse friendlyName, roomName, UDN, and deviceType using RegExp
         const deviceTypeMatch = xml.match(/<deviceType>(.*?)<\/deviceType>/);
         const friendlyNameMatch = xml.match(/<friendlyName>(.*?)<\/friendlyName>/);
+        const roomNameMatch = xml.match(/<roomName>(.*?)<\/roomName>/);
         const udnMatch = xml.match(/<UDN>(.*?)<\/UDN>/);
 
         const deviceType = deviceTypeMatch ? deviceTypeMatch[1] : '';
-        const friendlyName = friendlyNameMatch ? friendlyNameMatch[1] : '';
+        const roomName = roomNameMatch ? roomNameMatch[1] : '';
+        const friendlyName = roomName || (friendlyNameMatch ? friendlyNameMatch[1] : '');
         const udn = udnMatch ? udnMatch[1] : '';
 
         console.log(`[Discovery] Fetched description XML. Parsed: name="${friendlyName}", type="${deviceType}", udn="${udn}"`);
