@@ -197,11 +197,33 @@ function handleDeviceBye(usn) {
 
 // Start SSDP client
 const RENDERER_ST = 'urn:schemas-upnp-org:device:MediaRenderer:1';
-console.log(`[Discovery] Initializing SSDP client bound to interface: ${SERVER_IP}`);
-const ssdpClient = new Client({
-    interfaces: [SERVER_IP],
+
+// Find the network interface name associated with SERVER_IP
+let serverInterface = null;
+const networkInterfaces = os.networkInterfaces();
+for (const name of Object.keys(networkInterfaces)) {
+    for (const net of networkInterfaces[name]) {
+        if (net.address === SERVER_IP) {
+            serverInterface = name;
+            break;
+        }
+    }
+    if (serverInterface) break;
+}
+
+const clientOptions = {
     explicitSocketBind: true
-});
+};
+
+if (serverInterface) {
+    console.log(`[Discovery] Initializing SSDP client bound to interface name: ${serverInterface} (${SERVER_IP})`);
+    clientOptions.interfaces = [serverInterface];
+} else {
+    console.log(`[Discovery] Initializing SSDP client on all interfaces explicitly (could not map ${SERVER_IP})`);
+}
+
+const ssdpClient = new Client(clientOptions);
+
 
 ssdpClient.on('response', (headers, statusCode, rinfo) => {
     if (headers.LOCATION) {
