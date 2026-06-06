@@ -81,6 +81,14 @@ proxy.on('error', (err, req, res) => {
     res.end('Proxy Error');
 });
 
+proxy.on('proxyRes', (proxyRes, req, res) => {
+    console.log(`[Proxy] YouTube response: status=${proxyRes.statusCode}, type="${proxyRes.headers['content-type']}", size=${proxyRes.headers['content-length']} bytes`);
+    
+    // Force the Content-Type to audio/x-m4a so Sonos recognizes the stream format correctly
+    proxyRes.headers['content-type'] = 'audio/x-m4a';
+});
+
+
 const server = http.createServer(async (req, res) => {
     const parsedUrl = new URL(req.url, `http://${req.headers.host}`);
     

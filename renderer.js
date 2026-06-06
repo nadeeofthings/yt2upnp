@@ -236,10 +236,12 @@ class SonosPlayer extends Player {
                     if (position > 0) {
                         // If starting from a specific position, seek once playing begins
                         const seekOnPlaying = () => {
-                            console.log(`[Player:${this.name}] Seeking to starting position: ${position}s`);
-                            this.client.seek(position, (seekErr) => {
-                                if (seekErr) console.error(`[Player:${this.name}] Seek error:`, seekErr);
-                            });
+                            console.log(`[Player:${this.name}] Seeking to starting position: ${position}s (waiting 1.5s for buffer)...`);
+                            setTimeout(() => {
+                                this.client.seek(position, (seekErr) => {
+                                    if (seekErr) console.error(`[Player:${this.name}] Seek error:`, seekErr);
+                                });
+                            }, 1500);
                             this.client.removeListener('playing', seekOnPlaying);
                         };
                         this.client.on('playing', seekOnPlaying);
