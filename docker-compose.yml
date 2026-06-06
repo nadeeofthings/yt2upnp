@@ -1,0 +1,22 @@
+version: '3.8'
+
+services:
+  yt2upnp:
+    container_name: yt2upnp
+    build: .
+    image: yt2upnp:latest
+    restart: unless-stopped
+    
+    # CRITICAL: Must be run in host network mode for SSDP UDP multicast discovery to work.
+    # Standard bridge network will block discovery of Sonos devices on your local network.
+    network_mode: host
+    
+    environment:
+      - NODE_ENV=production
+      # - SERVER_IP=192.168.1.10  # Optional: Override auto-detected server IP if it uses a wrong interface
+      - PROXY_PORT=8085
+      - RECEIVER_PORT_START=8090
+      
+    volumes:
+      # Persists pairing tokens (Lounge configurations) so they are kept when the container restarts
+      - ./data:/usr/src/app/data
