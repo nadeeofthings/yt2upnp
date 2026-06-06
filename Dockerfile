@@ -21,7 +21,7 @@ COPY package*.json ./
 RUN npm install --omit=dev
 
 # Copy application source code
-COPY index.js renderer.js ./
+COPY index.js renderer.js dashboard.html ./
 
 # Create directory for persistent token data (Lounge configurations)
 RUN mkdir -p data
