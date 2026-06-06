@@ -134,6 +134,8 @@ class FileDataStore extends DataStore {
     }
 }
 
+const PLAYER_STATUSES = YouTubeCastReceiver.Constants.PLAYER_STATUSES;
+
 class SonosPlayer extends Player {
     constructor(upnpClient, name, proxyUrlBase) {
         super();
@@ -143,6 +145,7 @@ class SonosPlayer extends Player {
         this.isLoading = false;
 
         // Set up event listeners from the Sonos UPnP client to sync state with YouTube
+
         this.client.on('playing', () => {
             console.log(`[Player:${this.name}] UPnP playing event received`);
             this.isLoading = false;
@@ -180,7 +183,32 @@ class SonosPlayer extends Player {
         });
     }
 
+    notifyPlayed() {
+        this.notifyExternalStateChange(PLAYER_STATUSES.PLAYING).catch(e => {
+            console.error(`[Player:${this.name}] Error notifying played state:`, e);
+        });
+    }
+
+    notifyPaused() {
+        this.notifyExternalStateChange(PLAYER_STATUSES.PAUSED).catch(e => {
+            console.error(`[Player:${this.name}] Error notifying paused state:`, e);
+        });
+    }
+
+    notifyStopped() {
+        this.notifyExternalStateChange(PLAYER_STATUSES.STOPPED).catch(e => {
+            console.error(`[Player:${this.name}] Error notifying stopped state:`, e);
+        });
+    }
+
+    notifyLoading() {
+        this.notifyExternalStateChange(PLAYER_STATUSES.LOADING).catch(e => {
+            console.error(`[Player:${this.name}] Error notifying loading state:`, e);
+        });
+    }
+
     async doPlay(video, position) {
+
         console.log(`[Player:${this.name}] doPlay: videoId=${video.id}, title="${video.title}", startPosition=${position}s`);
         this.isLoading = true;
         this.notifyLoading();
