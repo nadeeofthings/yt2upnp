@@ -1,0 +1,864 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sonos YouTube Music Bridge - Dashboard</title>
+    <!-- Modern Premium Font -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-base: #09090b;
+            --bg-surface: rgba(24, 24, 27, 0.7);
+            --bg-card: rgba(39, 39, 42, 0.5);
+            --border: rgba(255, 255, 255, 0.08);
+            --border-hover: rgba(255, 255, 255, 0.15);
+            
+            --primary: #8b5cf6;
+            --primary-hover: #a78bfa;
+            --primary-glow: rgba(139, 92, 246, 0.35);
+            
+            --accent: #6366f1;
+            --accent-glow: rgba(99, 102, 241, 0.25);
+            
+            --success: #10b981;
+            --success-glow: rgba(16, 185, 129, 0.4);
+            
+            --text-main: #f4f4f5;
+            --text-muted: #a1a1aa;
+            --text-disabled: #52525b;
+            
+            --font-family: 'Outfit', sans-serif;
+            --radius-lg: 16px;
+            --radius-md: 12px;
+            --radius-sm: 8px;
+            
+            --transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: var(--font-family);
+            background-color: var(--bg-base);
+            color: var(--text-main);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            overflow-x: hidden;
+            background-image: 
+                radial-gradient(circle at 10% 20%, rgba(139, 92, 246, 0.08) 0%, transparent 40%),
+                radial-gradient(circle at 90% 80%, rgba(99, 102, 241, 0.08) 0%, transparent 40%);
+            background-attachment: fixed;
+        }
+
+        header {
+            width: 100%;
+            max-width: 1200px;
+            padding: 2.5rem 1.5rem 1.5rem 1.5rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .logo-section h1 {
+            font-size: 2rem;
+            font-weight: 700;
+            letter-spacing: -0.03em;
+            background: linear-gradient(135deg, var(--text-main) 30%, var(--primary-hover));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .logo-badge {
+            background: linear-gradient(135deg, var(--primary), var(--accent));
+            color: white;
+            font-size: 0.75rem;
+            font-weight: 600;
+            padding: 0.2rem 0.6rem;
+            border-radius: 20px;
+            box-shadow: 0 0 15px var(--primary-glow);
+            letter-spacing: 0.05em;
+        }
+
+        .logo-section p {
+            font-size: 0.9rem;
+            color: var(--text-muted);
+            margin-top: 0.25rem;
+        }
+
+        .system-status {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            background: var(--bg-surface);
+            border: 1px solid var(--border);
+            padding: 0.6rem 1.2rem;
+            border-radius: 30px;
+            backdrop-filter: blur(12px);
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            background-color: var(--success);
+            border-radius: 50%;
+            box-shadow: 0 0 10px var(--success-glow);
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.3); opacity: 0.6; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+
+        main {
+            width: 100%;
+            max-width: 1200px;
+            padding: 0 1.5rem 3rem 1.5rem;
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 2rem;
+        }
+
+        @media (min-width: 900px) {
+            main {
+                grid-template-columns: 3fr 2fr;
+            }
+        }
+
+        .section-title {
+            font-size: 1.25rem;
+            font-weight: 600;
+            margin-bottom: 1.25rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            letter-spacing: -0.01em;
+        }
+
+        /* Glassmorphic Cards/Containers */
+        .glass-panel {
+            background: var(--bg-surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-lg);
+            padding: 1.75rem;
+            backdrop-filter: blur(12px);
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+        }
+
+        /* Grid of Speakers */
+        .speaker-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 1rem;
+        }
+
+        @media (min-width: 600px) {
+            .speaker-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+
+        .speaker-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            padding: 1.25rem;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            gap: 1.25rem;
+            transition: var(--transition);
+        }
+
+        .speaker-card:hover {
+            border-color: var(--border-hover);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+        }
+
+        .speaker-card.group-coordinator {
+            border: 1.5px solid var(--primary);
+            box-shadow: inset 0 0 12px rgba(139, 92, 246, 0.05);
+        }
+
+        .speaker-card.group-follower {
+            opacity: 0.75;
+            border-style: dashed;
+        }
+
+        .speaker-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+        }
+
+        .speaker-info h3 {
+            font-size: 1.05rem;
+            font-weight: 600;
+            color: var(--text-main);
+        }
+
+        .speaker-info p {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            margin-top: 0.2rem;
+            font-family: monospace;
+        }
+
+        .speaker-badge {
+            font-size: 0.7rem;
+            font-weight: 600;
+            padding: 0.2rem 0.5rem;
+            border-radius: 4px;
+            text-transform: uppercase;
+        }
+
+        .badge-standalone {
+            background-color: rgba(255, 255, 255, 0.06);
+            color: var(--text-muted);
+        }
+
+        .badge-coordinator {
+            background-color: rgba(139, 92, 246, 0.15);
+            color: var(--primary-hover);
+            border: 1px solid rgba(139, 92, 246, 0.3);
+        }
+
+        .badge-follower {
+            background-color: rgba(99, 102, 241, 0.15);
+            color: #818cf8;
+            border: 1px solid rgba(99, 102, 241, 0.3);
+        }
+
+        /* Volume Slider Customization */
+        .volume-container {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .volume-icon {
+            color: var(--text-muted);
+            font-size: 0.9rem;
+            width: 1.2rem;
+        }
+
+        .volume-slider {
+            flex-grow: 1;
+            -webkit-appearance: none;
+            appearance: none;
+            height: 5px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 5px;
+            outline: none;
+            transition: var(--transition);
+        }
+
+        .volume-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            background: var(--text-main);
+            cursor: pointer;
+            transition: var(--transition);
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
+        }
+
+        .volume-slider:hover::-webkit-slider-thumb {
+            background: var(--primary-hover);
+            transform: scale(1.2);
+            box-shadow: 0 0 8px var(--primary-glow);
+        }
+
+        .volume-value {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            width: 1.75rem;
+            text-align: right;
+            font-variant-numeric: tabular-nums;
+        }
+
+        /* Group Configuration Form */
+        .form-group {
+            margin-bottom: 1.25rem;
+        }
+
+        .form-group label {
+            display: block;
+            font-size: 0.85rem;
+            font-weight: 500;
+            color: var(--text-muted);
+            margin-bottom: 0.5rem;
+        }
+
+        .input-text {
+            width: 100%;
+            background: rgba(0, 0, 0, 0.2);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            padding: 0.75rem;
+            color: var(--text-main);
+            font-family: var(--font-family);
+            font-size: 0.95rem;
+            outline: none;
+            transition: var(--transition);
+        }
+
+        .input-text:focus {
+            border-color: var(--primary);
+            box-shadow: 0 0 10px var(--primary-glow);
+        }
+
+        .select-custom {
+            width: 100%;
+            background: rgba(0, 0, 0, 0.2);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            padding: 0.75rem;
+            color: var(--text-main);
+            font-family: var(--font-family);
+            font-size: 0.95rem;
+            outline: none;
+            cursor: pointer;
+            transition: var(--transition);
+            appearance: none;
+            background-image: url("data:image/svg+xml;utf8,<svg fill='white' height='24' viewBox='0 0 24 24' width='24' xmlns='http://www.w3.org/2000/svg'><path d='M7 10l5 5 5-5z'/><path d='M0 0h24v24H0z' fill='none'/></svg>");
+            background-repeat: no-repeat;
+            background-position: right 0.75rem center;
+            background-size: 1.25rem;
+        }
+
+        .select-custom:focus {
+            border-color: var(--primary);
+        }
+
+        .checkbox-container {
+            display: flex;
+            flex-direction: column;
+            gap: 0.6rem;
+            background: rgba(0, 0, 0, 0.15);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            padding: 0.75rem;
+            max-height: 150px;
+            overflow-y: auto;
+        }
+
+        .checkbox-label {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.9rem;
+            cursor: pointer;
+            user-select: none;
+            color: var(--text-main);
+            transition: var(--transition);
+        }
+
+        .checkbox-label input {
+            cursor: pointer;
+            width: 16px;
+            height: 16px;
+            accent-color: var(--primary);
+        }
+
+        /* Buttons */
+        .btn {
+            width: 100%;
+            font-family: var(--font-family);
+            font-size: 0.95rem;
+            font-weight: 600;
+            padding: 0.8rem;
+            border-radius: var(--radius-sm);
+            border: none;
+            cursor: pointer;
+            transition: var(--transition);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, var(--primary), var(--accent));
+            color: white;
+            box-shadow: 0 4px 15px rgba(139, 92, 246, 0.2);
+        }
+
+        .btn-primary:hover:not(:disabled) {
+            transform: translateY(-1px);
+            box-shadow: 0 6px 20px var(--primary-glow);
+            filter: brightness(1.1);
+        }
+
+        .btn-primary:active:not(:disabled) {
+            transform: translateY(0);
+        }
+
+        .btn:disabled {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            color: var(--text-disabled);
+            cursor: not-allowed;
+            box-shadow: none;
+        }
+
+        .btn-danger {
+            background: rgba(239, 68, 68, 0.1);
+            color: #ef4444;
+            border: 1px solid rgba(239, 68, 68, 0.2);
+            font-size: 0.85rem;
+            padding: 0.5rem 0.8rem;
+            width: auto;
+        }
+
+        .btn-danger:hover {
+            background: rgba(239, 68, 68, 0.2);
+            border-color: rgba(239, 68, 68, 0.4);
+        }
+
+        /* Active Groups Panel */
+        .groups-panel {
+            margin-top: 1.5rem;
+        }
+
+        .group-list {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+
+        .group-item {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            padding: 1.25rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            transition: var(--transition);
+        }
+
+        .group-item:hover {
+            border-color: var(--border-hover);
+        }
+
+        .group-detail h4 {
+            font-size: 1.05rem;
+            font-weight: 600;
+            color: var(--text-main);
+        }
+
+        .group-detail p {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            margin-top: 0.2rem;
+        }
+
+        /* Empty/Loading States */
+        .empty-state {
+            text-align: center;
+            padding: 2.5rem;
+            color: var(--text-muted);
+            font-size: 0.95rem;
+            border: 1px dashed var(--border);
+            border-radius: var(--radius-md);
+            background: rgba(0, 0, 0, 0.1);
+        }
+
+        .toast-notification {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: rgba(24, 24, 27, 0.9);
+            border: 1px solid var(--primary);
+            color: var(--text-main);
+            padding: 1rem 1.5rem;
+            border-radius: var(--radius-md);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5), 0 0 15px var(--primary-glow);
+            backdrop-filter: blur(10px);
+            z-index: 1000;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            opacity: 0;
+            transform: translateY(20px);
+            transition: var(--transition);
+            pointer-events: none;
+        }
+
+        .toast-notification.show {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="logo-section">
+            <h1>yt2upnp <span class="logo-badge">V1.0</span></h1>
+            <p>Sonos &amp; UPnP YouTube Music Audio Bridge</p>
+        </div>
+        <div class="system-status">
+            <div class="status-dot"></div>
+            <span>SSDP Active</span>
+        </div>
+    </header>
+
+    <main>
+        <!-- Left Side: Speakers Grid -->
+        <section class="glass-panel">
+            <h2 class="section-title">
+                <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                    <rect x="4" y="2" width="16" height="20" rx="2" ry="2"></rect>
+                    <circle cx="12" cy="14" r="4"></circle>
+                    <line x1="12" y1="6" x2="12.01" y2="6"></line>
+                </svg>
+                Discovered Speakers
+            </h2>
+            <div id="speaker-list" class="speaker-grid">
+                <div class="empty-state">Searching local network for Sonos/UPnP speakers...</div>
+            </div>
+        </section>
+
+        <!-- Right Side: Group Builder & Active Groups -->
+        <section style="display: flex; flex-direction: column; gap: 2rem;">
+            <!-- Group Creator Panel -->
+            <div class="glass-panel">
+                <h2 class="section-title">
+                    <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                        <circle cx="9" cy="7" r="4"></circle>
+                        <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+                        <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+                    </svg>
+                    Create Speaker Group
+                </h2>
+                
+                <form id="group-form" onsubmit="event.preventDefault(); handleCreateGroup();">
+                    <div class="form-group">
+                        <label for="group-name">Group Name</label>
+                        <input type="text" id="group-name" class="input-text" placeholder="e.g. Downstairs, Whole House" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="group-coordinator">Group Coordinator (Master)</label>
+                        <select id="group-coordinator" class="select-custom" onchange="updateMemberCheckboxes()" required>
+                            <option value="" disabled selected>Select master speaker...</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Select Speakers to Join Group</label>
+                        <div id="members-container" class="checkbox-container">
+                            <div style="color: var(--text-muted); font-size: 0.85rem; padding: 0.25rem 0;">
+                                Select a coordinator first
+                            </div>
+                        </div>
+                    </div>
+
+                    <button type="submit" id="submit-group-btn" class="btn btn-primary" disabled>
+                        Create Cast Group
+                    </button>
+                </form>
+            </div>
+
+            <!-- Active Groups Panel -->
+            <div class="glass-panel groups-panel">
+                <h2 class="section-title">
+                    <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <line x1="12" y1="8" x2="12" y2="16"></line>
+                        <line x1="8" y1="12" x2="16" y2="12"></line>
+                    </svg>
+                    Active Group Receivers
+                </h2>
+                <div id="active-groups-list" class="group-list">
+                    <div class="empty-state">No active groups. Standard speakers cast independently.</div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- Toast Notification -->
+    <div id="toast" class="toast-notification"></div>
+
+    <script>
+        let devicesData = [];
+        let groupsData = [];
+        let isUpdatingVolume = false;
+
+        async function fetchStatus() {
+            try {
+                const response = await fetch('/api/status');
+                if (!response.ok) throw new Error('Failed to retrieve status');
+                const data = await response.json();
+                
+                devicesData = data.devices || [];
+                groupsData = data.groups || [];
+                
+                renderSpeakers();
+                renderGroupFormOptions();
+                renderActiveGroups();
+            } catch (err) {
+                console.error('Error fetching system status:', err);
+            }
+        }
+
+        // Display discovered speakers
+        function renderSpeakers() {
+            const listContainer = document.getElementById('speaker-list');
+            if (devicesData.length === 0) {
+                listContainer.innerHTML = '<div class="empty-state">No Sonos or UPnP speakers discovered yet.</div>';
+                return;
+            }
+
+            let html = '';
+            devicesData.forEach(device => {
+                let cardClass = 'speaker-card';
+                let badgeClass = 'badge-standalone';
+                let roleLabel = 'Standalone';
+
+                if (device.role === 'coordinator') {
+                    cardClass += ' group-coordinator';
+                    badgeClass = 'badge-coordinator';
+                    roleLabel = `Master: ${device.activeGroupName}`;
+                } else if (device.role === 'follower') {
+                    cardClass += ' group-follower';
+                    badgeClass = 'badge-follower';
+                    roleLabel = `Follower: ${device.activeGroupName}`;
+                }
+
+                html += `
+                    <div class="${cardClass}" id="card-${device.udn}">
+                        <div class="speaker-header">
+                            <div class="speaker-info">
+                                <h3>${device.friendlyName}</h3>
+                                <p>${device.udn.replace('uuid:', '')}</p>
+                            </div>
+                            <span class="speaker-badge ${badgeClass}">${roleLabel}</span>
+                        </div>
+                        <div class="volume-container">
+                            <span class="volume-icon">
+                                <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                                    <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+                                    <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+                                </svg>
+                            </span>
+                            <input type="range" min="0" max="100" class="volume-slider" 
+                                value="${device.volume}" 
+                                oninput="updateVolumeText('${device.udn}', this.value)" 
+                                onchange="setVolume('${device.udn}', this.value)">
+                            <span class="volume-value" id="vol-txt-${device.udn}">${device.volume}%</span>
+                        </div>
+                    </div>
+                `;
+            });
+            listContainer.innerHTML = html;
+        }
+
+        function updateVolumeText(udn, value) {
+            document.getElementById(`vol-txt-${udn}`).innerText = value + '%';
+        }
+
+        async function setVolume(udn, value) {
+            isUpdatingVolume = true;
+            try {
+                const response = await fetch('/api/volume', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ udn, level: parseInt(value, 10) })
+                });
+                if (!response.ok) throw new Error('Volume adjust failed');
+                showToast(`Volume adjusted successfully.`);
+            } catch (err) {
+                showToast(`Error adjusting volume: ${err.message}`);
+            } finally {
+                isUpdatingVolume = false;
+            }
+        }
+
+        // Render selectors for Group Builder
+        function renderGroupFormOptions() {
+            const select = document.getElementById('group-coordinator');
+            const selectedVal = select.value;
+
+            // Filter standalone or existing group masters to select as coordinator
+            const eligibleCoordinators = devicesData.filter(d => d.role !== 'follower');
+
+            let optionsHtml = '<option value="" disabled>Select master speaker...</option>';
+            eligibleCoordinators.forEach(d => {
+                const selectedAttr = d.udn === selectedVal ? 'selected' : '';
+                optionsHtml += `<option value="${d.udn}" ${selectedAttr}>${d.friendlyName}</option>`;
+            });
+
+            select.innerHTML = optionsHtml;
+            updateMemberCheckboxes();
+        }
+
+        function updateMemberCheckboxes() {
+            const select = document.getElementById('group-coordinator');
+            const coordinatorUdn = select.value;
+            const container = document.getElementById('members-container');
+            const btn = document.getElementById('submit-group-btn');
+
+            if (!coordinatorUdn) {
+                container.innerHTML = '<div style="color: var(--text-muted); font-size: 0.85rem; padding: 0.25rem 0;">Select a coordinator first</div>';
+                btn.disabled = true;
+                return;
+            }
+
+            // Other speakers eligible to join this coordinator (not the coordinator itself)
+            const joinableDevices = devicesData.filter(d => d.udn !== coordinatorUdn);
+
+            if (joinableDevices.length === 0) {
+                container.innerHTML = '<div style="color: var(--text-muted); font-size: 0.85rem; padding: 0.25rem 0;">No other speakers discovered yet</div>';
+                btn.disabled = true;
+                return;
+            }
+
+            let html = '';
+            joinableDevices.forEach(d => {
+                // Check if currently a follower of this specific group or if not in any group
+                let checkedAttr = '';
+                const activeGroup = groupsData.find(g => g.coordinatorUdn === coordinatorUdn);
+                if (activeGroup && activeGroup.memberUdns.includes(d.udn)) {
+                    checkedAttr = 'checked';
+                }
+
+                html += `
+                    <label class="checkbox-label">
+                        <input type="checkbox" name="member-speaker" value="${d.udn}" ${checkedAttr} onchange="validateGroupForm()">
+                        <span>${d.friendlyName}</span>
+                    </label>
+                `;
+            });
+
+            container.innerHTML = html;
+            validateGroupForm();
+        }
+
+        function validateGroupForm() {
+            const select = document.getElementById('group-coordinator');
+            const checkboxes = document.querySelectorAll('input[name="member-speaker"]:checked');
+            const btn = document.getElementById('submit-group-btn');
+            
+            btn.disabled = !(select.value && checkboxes.length > 0);
+        }
+
+        async function handleCreateGroup() {
+            const groupName = document.getElementById('group-name').value.trim();
+            const coordinatorUdn = document.getElementById('group-coordinator').value;
+            const checkboxElements = document.querySelectorAll('input[name="member-speaker"]:checked');
+            
+            const memberUdns = Array.from(checkboxElements).map(el => el.value);
+
+            if (!groupName || !coordinatorUdn || memberUdns.length === 0) return;
+
+            try {
+                const response = await fetch('/api/groups', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: groupName, coordinatorUdn, memberUdns })
+                });
+
+                if (!response.ok) throw new Error('Failed to create group');
+                
+                showToast(`Cast Group "${groupName}" created successfully!`);
+                document.getElementById('group-name').value = '';
+                document.getElementById('group-coordinator').value = '';
+                updateMemberCheckboxes();
+                fetchStatus();
+            } catch (err) {
+                showToast(`Error creating group: ${err.message}`);
+            }
+        }
+
+        // Render administrative groups list
+        function renderActiveGroups() {
+            const container = document.getElementById('active-groups-list');
+            if (groupsData.length === 0) {
+                container.innerHTML = '<div class="empty-state">No active groups. Standard speakers cast independently.</div>';
+                return;
+            }
+
+            let html = '';
+            groupsData.forEach(group => {
+                const coordDevice = devicesData.find(d => d.udn === group.coordinatorUdn);
+                const coordName = coordDevice ? coordDevice.friendlyName : 'Unknown Master';
+                const memberNames = group.memberUdns.map(mUdn => {
+                    const dev = devicesData.find(d => d.udn === mUdn);
+                    return dev ? dev.friendlyName : 'Unknown Speaker';
+                }).join(', ');
+
+                html += `
+                    <div class="group-item">
+                        <div class="group-detail">
+                            <h4>Sonos Group: ${group.name}</h4>
+                            <p style="color: var(--primary-hover); font-size: 0.85rem; margin-top: 0.1rem;">
+                                Virtual Cast Port: ${group.port || 'Starting...'}
+                            </p>
+                            <p style="margin-top: 0.35rem; font-size: 0.85rem;">
+                                <strong style="color: var(--text-main);">Master:</strong> ${coordName}
+                            </p>
+                            <p style="font-size: 0.85rem;">
+                                <strong style="color: var(--text-main);">Members:</strong> ${memberNames}
+                            </p>
+                        </div>
+                        <button class="btn btn-danger" onclick="disbandGroup('${group.name}')">
+                            Ungroup
+                        </button>
+                    </div>
+                `;
+            });
+            container.innerHTML = html;
+        }
+
+        async function disbandGroup(groupName) {
+            try {
+                const response = await fetch(`/api/groups?name=${encodeURIComponent(groupName)}`, {
+                    method: 'DELETE'
+                });
+                if (!response.ok) throw new Error('Disband group failed');
+                
+                showToast(`Group "${groupName}" disbanded.`);
+                fetchStatus();
+            } catch (err) {
+                showToast(`Error disbanding group: ${err.message}`);
+            }
+        }
+
+        function showToast(message) {
+            const toast = document.getElementById('toast');
+            toast.innerText = message;
+            toast.classList.add('show');
+            setTimeout(() => {
+                toast.classList.remove('show');
+            }, 3000);
+        }
+
+        // Initial setup and polling (every 3 seconds)
+        fetchStatus();
+        setInterval(() => {
+            if (!isUpdatingVolume) {
+                fetchStatus();
+            }
+        }, 3000);
+    </script>
+</body>
+</html>

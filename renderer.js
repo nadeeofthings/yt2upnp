@@ -235,11 +235,12 @@ class FileDataStore extends DataStore {
 const PLAYER_STATUSES = YouTubeCastReceiver.Constants.PLAYER_STATUSES;
 
 class SonosPlayer extends Player {
-    constructor(upnpClient, name, proxyUrlBase) {
+    constructor(upnpClient, name, proxyUrlBase, groupClients = []) {
         super();
         this.client = upnpClient;
         this.name = name;
         this.proxyUrlBase = proxyUrlBase;
+        this.groupClients = groupClients; // Array of MediaRendererClient instances for group members
         this.isLoading = false;
         this.isExplicitStop = false;
 
@@ -426,16 +427,23 @@ class SonosPlayer extends Player {
 
     async doSetVolume(volume) {
         console.log(`[Player:${this.name}] doSetVolume level=${volume.level}, muted=${volume.muted}`);
-        return new Promise((resolve) => {
-            this.client.setVolume(volume.level, (err) => {
-                if (err) {
-                    console.error(`[Player:${this.name}] SetVolume error:`, err);
-                    resolve(false);
-                } else {
+        const clientsToSet = this.groupClients && this.groupClients.length > 0
+            ? this.groupClients
+            : [this.client];
+
+        const promises = clientsToSet.map(client => {
+            return new Promise((resolve) => {
+                client.setVolume(volume.level, (err) => {
+                    if (err) {
+                        console.error(`[Player:${this.name}] SetVolume error on speaker:`, err);
+                    }
                     resolve(true);
-                }
+                });
             });
         });
+
+        await Promise.all(promises);
+        return true;
     }
 
     async doGetVolume() {
@@ -473,15 +481,50 @@ class SonosPlayer extends Player {
             });
         });
     }
+
+    async joinGroup(coordinatorUdn) {
+        console.log(`[Player:${this.name}] Joining group of coordinator: ${coordinatorUdn}`);
+        return new Promise((resolve) => {
+            this.client.callAction('AVTransport', 'SetAVTransportURI', {
+                InstanceID: 0,
+                CurrentURI: `x-rincon:${coordinatorUdn}`,
+                CurrentURIMetaData: ''
+            }, (err) => {
+                if (err) {
+                    console.error(`[Player:${this.name}] Error joining group:`, err);
+                    resolve(false);
+                } else {
+                    resolve(true);
+                }
+            });
+        });
+    }
+
+    async leaveGroup() {
+        console.log(`[Player:${this.name}] Leaving group to become standalone`);
+        return new Promise((resolve) => {
+            this.client.callAction('AVTransport', 'BecomeCoordinatorOfStandaloneGroup', {
+                InstanceID: 0
+            }, (err) => {
+                if (err) {
+                    console.error(`[Player:${this.name}] Error leaving group:`, err);
+                    resolve(false);
+                } else {
+                    resolve(true);
+                }
+            });
+        });
+    }
 }
 
 class SonosRendererBridge {
-    constructor(deviceUrl, friendlyName, udn, proxyUrlBase, receiverPort) {
+    constructor(deviceUrl, friendlyName, udn, proxyUrlBase, receiverPort, groupClients = []) {
         this.deviceUrl = deviceUrl;
         this.friendlyName = friendlyName;
         this.udn = udn;
         this.proxyUrlBase = proxyUrlBase;
         this.receiverPort = receiverPort;
+        this.groupClients = groupClients;
 
         console.log(`[Bridge:${friendlyName}] Initializing bridge on port ${receiverPort}...`);
         
@@ -489,7 +532,7 @@ class SonosRendererBridge {
         this.upnpClient = new MediaRendererClient(deviceUrl);
         
         // Initialize the Player
-        this.player = new SonosPlayer(this.upnpClient, friendlyName, proxyUrlBase);
+        this.player = new SonosPlayer(this.upnpClient, friendlyName, proxyUrlBase, groupClients);
         
         // Initialize isolated file-based DataStore
         const cleanName = friendlyName.replace(/[^a-zA-Z0-9]/g, '_');
