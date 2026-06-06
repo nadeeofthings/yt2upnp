@@ -1,12 +1,102 @@
-const ytcr = require('yt-cast-receiver');
-const Player = ytcr.Player;
-const YouTubeCastReceiver = ytcr.YouTubeCastReceiver;
+const YouTubeCastReceiver = require('yt-cast-receiver');
+const Player = YouTubeCastReceiver.Player;
 // Defensive fallback in case DataStore is not exported directly
-const DataStore = ytcr.DataStore || class {};
+const DataStore = YouTubeCastReceiver.DataStore || class {};
 
 const MediaRendererClient = require('upnp-mediarenderer-client');
+const DeviceClient = require('upnp-device-client');
+const et = require('elementtree');
+const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
+
+// --- UPnP DeviceClient Monkey Patch for Nested Services (e.g. Sonos) ---
+const originalGetDeviceDescription = DeviceClient.prototype.getDeviceDescription;
+
+DeviceClient.prototype.getDeviceDescription = function(callback) {
+  var self = this;
+  originalGetDeviceDescription.call(this, function(err, desc) {
+    if (err) return callback(err);
+
+    // If AVTransport is missing from the root device, search in nested devices
+    if (desc && (!desc.services || !desc.services['urn:upnp-org:serviceId:AVTransport'])) {
+      console.log(`[Patch] AVTransport service not found in root device. Searching nested devices in XML...`);
+
+      axios.get(self.url)
+        .then(response => {
+          try {
+            const doc = et.parse(response.data);
+            const baseUrl = extractBaseUrl(self.url);
+
+            // Find all services in the XML (including nested ones)
+            const allServices = doc.findall('.//service');
+            allServices.forEach(function(service) {
+              const tmp = extractFields(service, [
+                'serviceType',
+                'serviceId',
+                'SCPDURL',
+                'controlURL',
+                'eventSubURL'
+              ]);
+
+              const id = tmp.serviceId;
+              if (id && !desc.services[id]) {
+                delete tmp.serviceId;
+                // Make URLs absolute
+                tmp.SCPDURL = buildAbsoluteUrl(baseUrl, tmp.SCPDURL);
+                tmp.controlURL = buildAbsoluteUrl(baseUrl, tmp.controlURL);
+                tmp.eventSubURL = buildAbsoluteUrl(baseUrl, tmp.eventSubURL);
+
+                desc.services[id] = tmp;
+                console.log(`[Patch] Added nested service: ${id}`);
+              }
+            });
+
+            // Store updated description in cache
+            self.deviceDescription = desc;
+            callback(null, desc);
+          } catch (e) {
+            console.error('[Patch] Error parsing XML for nested services:', e);
+            callback(null, desc); // Fallback to original desc
+          }
+        })
+        .catch(fetchErr => {
+          console.error('[Patch] Error fetching XML for nested services:', fetchErr);
+          callback(null, desc); // Fallback to original desc
+        });
+    } else {
+      callback(null, desc);
+    }
+  });
+};
+
+function buildAbsoluteUrl(base, url) {
+  if(url === '') return '';
+  if(url.substring(0, 4) === 'http') return url;
+  if(url[0] === '/') {
+    var root = base.split('/').slice(0, 3).join('/'); // http://host:port
+    return root + url;
+  } else {
+    return base + '/' + url;
+  }
+}
+
+function extractBaseUrl(url) {
+  return url.split('/').slice(0, -1).join('/');
+}
+
+function extractFields(node, fields) {
+  var data = {};
+  fields.forEach(function(field) {
+    var value = node.findtext('./' + field);
+    if(typeof value !== 'undefined') {
+      data[field] = value;
+    }
+  });
+  return data;
+}
+// -----------------------------------------------------------------------
+
 
 // A custom data store for each speaker to isolate pairing tokens
 class FileDataStore extends DataStore {
