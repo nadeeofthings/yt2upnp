@@ -70,6 +70,103 @@ DeviceClient.prototype.getDeviceDescription = function(callback) {
   });
 };
 
+// Monkey patch callAction to prevent crash on missing errorDescription
+DeviceClient.prototype.callAction = function(serviceId, actionName, params, callback) {
+  var self = this;
+  var resolvedServiceId = (serviceId.indexOf(':') === -1) 
+    ? 'urn:upnp-org:serviceId:' + serviceId 
+    : serviceId;
+
+  this.getServiceDescription(resolvedServiceId, function(err, desc) {
+    if(err) return callback(err);
+
+    if(!desc.actions[actionName]) {
+      var err = new Error('Action ' + actionName + ' not implemented by service');
+      err.code = 'ENOACTION';
+      return callback(err);
+    }
+
+    var service = self.deviceDescription.services[resolvedServiceId];
+
+    // Build SOAP action body
+    var envelope = et.Element('s:Envelope');
+    envelope.set('xmlns:s', 'http://schemas.xmlsoap.org/soap/envelope/');
+    envelope.set('s:encodingStyle', 'http://schemas.xmlsoap.org/soap/encoding/');
+
+    var body = et.SubElement(envelope, 's:Body');
+    var action = et.SubElement(body, 'u:' + actionName);
+    action.set('xmlns:u', service.serviceType);
+
+    Object.keys(params).forEach(function(paramName) {
+      var tmp = et.SubElement(action, paramName);
+      var value = params[paramName];
+      tmp.text = (value === null || value === undefined)
+        ? '' 
+        : params[paramName].toString();
+    });
+
+    var doc = new et.ElementTree(envelope);
+    var xml = doc.write({ 
+      xml_declaration: true,
+    });
+
+    // Send action request
+    var options = require('url').parse(service.controlURL);
+    options.method = 'POST';
+    options.headers = {
+      'Content-Type': 'text/xml; charset="utf-8"',
+      'Content-Length': Buffer.byteLength(xml),
+      'Connection': 'close',
+      'SOAPACTION': '"' + service.serviceType + '#' + actionName + '"'
+    };
+
+    var http = require('http');
+    var req = http.request(options, function(res) {
+      var chunks = [];
+      res.on('data', function(chunk) {
+        chunks.push(chunk);
+      });
+      res.on('end', function() {
+        try {
+          var buf = Buffer.concat(chunks);
+          var doc = et.parse(buf.toString());
+
+          if(res.statusCode !== 200) {
+            var errorCode = doc.findtext('.//errorCode');
+            var errorDescription = doc.findtext('.//errorDescription');
+            var errorStr = errorDescription ? errorDescription.trim() : 'Unknown UPnP Error';
+
+            var err = new Error(errorStr + ' (' + errorCode + ')');
+            err.code = 'EUPNP';
+            err.statusCode = res.statusCode;
+            err.errorCode = errorCode;
+            return callback(err);
+          }
+
+          // Extract response outputs
+          var serviceDesc = self.serviceDescriptions[resolvedServiceId];
+          var actionDesc = serviceDesc.actions[actionName];
+          var outputs = actionDesc.outputs.map(function(desc) {
+            return desc.name;
+          });
+
+          var result = {};
+          outputs.forEach(function(name) {
+            result[name] = doc.findtext('.//' + name);
+          });
+
+          callback(null, result);
+        } catch (parseErr) {
+          callback(parseErr);
+        }
+      });
+    });
+
+    req.on('error', callback);
+    req.end(xml);
+  });
+};
+
 function buildAbsoluteUrl(base, url) {
   if(url === '') return '';
   if(url.substring(0, 4) === 'http') return url;
@@ -96,6 +193,7 @@ function extractFields(node, fields) {
   return data;
 }
 // -----------------------------------------------------------------------
+
 
 
 // A custom data store for each speaker to isolate pairing tokens

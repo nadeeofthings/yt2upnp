@@ -104,20 +104,47 @@ const server = http.createServer(async (req, res) => {
 
         try {
             const streamUrl = await getYouTubeStreamUrl(videoId);
-            console.log(`[Proxy] Forwarding request for video ${videoId} to YouTube stream`);
-            
-            // Forward request to YouTube googlevideo URL
-            proxy.web(req, res, {
-                target: streamUrl,
-                ignorePath: true,
-                headers: {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-                }
+            console.log(`[Proxy] Requesting stream for video ${videoId} from YouTube...`);
+
+            // Forward Range header if requested by the client (Sonos)
+            const forwardHeaders = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            };
+            if (req.headers['range']) {
+                forwardHeaders['range'] = req.headers['range'];
+                console.log(`[Proxy] Range requested: ${req.headers['range']}`);
+            }
+
+            const response = await axios({
+                method: 'get',
+                url: streamUrl,
+                responseType: 'stream',
+                headers: forwardHeaders,
+                validateStatus: () => true // Allow any status code (like 206, 302, etc.) to pass through
+            });
+
+            console.log(`[Proxy] YouTube response: status=${response.status}, type="${response.headers['content-type']}", size=${response.headers['content-length']} bytes`);
+
+            // Set reply headers and force audio/x-m4a MIME type
+            const replyHeaders = {};
+            if (response.headers['content-type']) replyHeaders['content-type'] = 'audio/x-m4a';
+            if (response.headers['content-length']) replyHeaders['content-length'] = response.headers['content-length'];
+            if (response.headers['content-range']) replyHeaders['content-range'] = response.headers['content-range'];
+            if (response.headers['accept-ranges']) replyHeaders['accept-ranges'] = response.headers['accept-ranges'];
+
+            res.writeHead(response.status, replyHeaders);
+            response.data.pipe(res);
+
+            // Handle client socket abort/close
+            req.on('close', () => {
+                response.data.destroy();
             });
         } catch (err) {
-            console.error(`[Proxy] Failed to resolve stream for video ${videoId}:`, err);
-            res.writeHead(500, { 'Content-Type': 'text/plain' });
-            res.end('Failed to resolve stream');
+            console.error(`[Proxy] Failed to resolve or proxy stream for video ${videoId}:`, err.message);
+            if (!res.headersSent) {
+                res.writeHead(500, { 'Content-Type': 'text/plain' });
+                res.end('Failed to resolve stream');
+            }
         }
     } else if (parsedUrl.pathname === '/health') {
         res.writeHead(200, { 'Content-Type': 'application/json' });
