@@ -241,8 +241,10 @@ class SonosPlayer extends Player {
         this.name = name;
         this.proxyUrlBase = proxyUrlBase;
         this.isLoading = false;
+        this.isExplicitStop = false;
 
         // Set up event listeners from the Sonos UPnP client to sync state with YouTube
+
 
         this.client.on('playing', () => {
             console.log(`[Player:${this.name}] UPnP playing event received`);
@@ -262,6 +264,17 @@ class SonosPlayer extends Player {
                 return;
             }
             this.notifyStopped();
+
+            if (this.isExplicitStop) {
+                console.log(`[Player:${this.name}] Explicit stop detected, not advancing.`);
+                this.isExplicitStop = false;
+                return;
+            }
+
+            console.log(`[Player:${this.name}] Track ended naturally. Advancing to next track...`);
+            this.next().catch(e => {
+                console.error(`[Player:${this.name}] Error advancing to next track:`, e);
+            });
         });
 
         this.client.on('status', (status) => {
@@ -309,6 +322,7 @@ class SonosPlayer extends Player {
 
         console.log(`[Player:${this.name}] doPlay: videoId=${video.id}, title="${video.title}", startPosition=${position}s`);
         this.isLoading = true;
+        this.isExplicitStop = false;
         this.notifyLoading();
 
         // Construct the stream URL pointing to our HTTP proxy
@@ -352,6 +366,7 @@ class SonosPlayer extends Player {
 
     async doPause() {
         console.log(`[Player:${this.name}] doPause`);
+        this.isExplicitStop = true;
         return new Promise((resolve) => {
             this.client.pause((err) => {
                 if (err) {
@@ -366,6 +381,7 @@ class SonosPlayer extends Player {
 
     async doResume() {
         console.log(`[Player:${this.name}] doResume`);
+        this.isExplicitStop = false;
         return new Promise((resolve) => {
             this.client.play((err) => {
                 if (err) {
@@ -381,6 +397,7 @@ class SonosPlayer extends Player {
     async doStop() {
         console.log(`[Player:${this.name}] doStop`);
         this.isLoading = false;
+        this.isExplicitStop = true;
         return new Promise((resolve) => {
             this.client.stop((err) => {
                 if (err) {
