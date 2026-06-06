@@ -515,6 +515,89 @@ class SonosPlayer extends Player {
             });
         });
     }
+
+    async doGetMediaInfo() {
+        return new Promise((resolve) => {
+            this.client.callAction('AVTransport', 'GetPositionInfo', { InstanceID: 0 }, (err, result) => {
+                if (err) {
+                    console.error(`[Player:${this.name}] GetPositionInfo error:`, err);
+                    resolve(null);
+                } else {
+                    let metadata = {
+                        title: 'No Title',
+                        artist: 'No Artist',
+                        album: '',
+                        albumArt: null,
+                        position: parseTimeToSeconds(result.RelTime),
+                        positionStr: formatRelTime(result.RelTime),
+                        duration: parseTimeToSeconds(result.TrackDuration),
+                        durationStr: formatRelTime(result.TrackDuration),
+                        isPlaying: false
+                    };
+
+                    const xml = result.TrackMetaData;
+                    if (xml && xml !== 'NOT_IMPLEMENTED' && xml !== '') {
+                        const titleMatch = xml.match(/<dc:title>(.*?)<\/dc:title>/i);
+                        const creatorMatch = xml.match(/<dc:creator>(.*?)<\/dc:creator>/i);
+                        const albumMatch = xml.match(/<upnp:album>(.*?)<\/upnp:album>/i);
+                        const albumArtMatch = xml.match(/<upnp:albumArtURI>(.*?)<\/upnp:albumArtURI>/i);
+
+                        function unescapeXml(str) {
+                            return str
+                                .replace(/&amp;/g, '&')
+                                .replace(/&lt;/g, '<')
+                                .replace(/&gt;/g, '>')
+                                .replace(/&quot;/g, '"')
+                                .replace(/&#39;/g, "'");
+                        }
+
+                        if (titleMatch && titleMatch[1]) metadata.title = unescapeXml(titleMatch[1]);
+                        if (creatorMatch && creatorMatch[1]) metadata.artist = unescapeXml(creatorMatch[1]);
+                        if (albumMatch && albumMatch[1]) metadata.album = unescapeXml(albumMatch[1]);
+                        if (albumArtMatch && albumArtMatch[1]) {
+                            let artUrl = unescapeXml(albumArtMatch[1]);
+                            if (artUrl.startsWith('/')) {
+                                try {
+                                    const parsedDeviceUrl = new URL(this.client.url);
+                                    artUrl = `${parsedDeviceUrl.protocol}//${parsedDeviceUrl.host}${artUrl}`;
+                                } catch (e) {}
+                            }
+                            metadata.albumArt = artUrl;
+                        }
+                    }
+
+                    this.client.getTransportInfo((infoErr, infoResult) => {
+                        if (!infoErr && infoResult && infoResult.CurrentTransportState) {
+                            metadata.isPlaying = infoResult.CurrentTransportState === 'PLAYING';
+                        }
+                        resolve(metadata);
+                    });
+                }
+            });
+        });
+    }
+
+    async skipNext() {
+        console.log(`[Player:${this.name}] Skip Next command received`);
+        try {
+            await this.next();
+            return true;
+        } catch (err) {
+            console.error(`[Player:${this.name}] Error in skipNext:`, err);
+            return false;
+        }
+    }
+
+    async skipPrevious() {
+        console.log(`[Player:${this.name}] Skip Previous command received`);
+        try {
+            await this.previous();
+            return true;
+        } catch (err) {
+            console.error(`[Player:${this.name}] Error in skipPrevious:`, err);
+            return false;
+        }
+    }
 }
 
 class SonosRendererBridge {
@@ -578,6 +661,23 @@ class SonosRendererBridge {
             console.error(`[Bridge:${this.friendlyName}] Error during stop:`, err);
         }
     }
+}
+
+function parseTimeToSeconds(timeStr) {
+    if (!timeStr || timeStr === 'NOT_IMPLEMENTED') return 0;
+    const parts = timeStr.split(':').map(Number);
+    if (parts.length === 3) {
+        return parts[0] * 3600 + parts[1] * 60 + parts[2];
+    }
+    return 0;
+}
+
+function formatRelTime(timeStr) {
+    if (!timeStr || timeStr === 'NOT_IMPLEMENTED') return '00:00';
+    if (timeStr.startsWith('00:')) {
+        return timeStr.substring(3);
+    }
+    return timeStr;
 }
 
 module.exports = {

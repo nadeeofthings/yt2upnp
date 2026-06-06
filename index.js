@@ -356,13 +356,27 @@ const server = http.createServer(async (req, res) => {
             }
 
             let volume = 30;
+            let mediaInfo = null;
+
             try {
-                const volObj = await Promise.race([
-                    bridge.player.doGetVolume(),
-                    new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 1000))
+                const results = await Promise.race([
+                    Promise.all([
+                        bridge.player.doGetVolume(),
+                        bridge.player.doGetMediaInfo()
+                    ]),
+                    new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 1200))
                 ]);
-                volume = volObj.level;
-            } catch(e) {}
+                volume = results[0].level;
+                mediaInfo = results[1];
+            } catch(e) {
+                try {
+                    const volObj = await Promise.race([
+                        bridge.player.doGetVolume(),
+                        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 500))
+                    ]);
+                    volume = volObj.level;
+                } catch(ve) {}
+            }
 
             return {
                 udn,
@@ -370,22 +384,43 @@ const server = http.createServer(async (req, res) => {
                 location: bridge.deviceUrl,
                 role,
                 activeGroupName,
-                volume
+                volume,
+                mediaInfo
             };
         });
 
-        Promise.all(devicePromises).then(devices => {
-            const groups = savedGroups.map(g => {
-                const activeGroup = activeGroups.get(g.name);
-                return {
-                    name: g.name,
-                    coordinatorUdn: g.coordinatorUdn,
-                    memberUdns: g.memberUdns,
-                    online: !!activeGroup,
-                    port: activeGroup ? activeGroup.port : null
-                };
-            });
+        const groupPromises = savedGroups.map(async (g) => {
+            const activeGroup = activeGroups.get(g.name);
+            let volume = 30;
+            let mediaInfo = null;
 
+            if (activeGroup) {
+                try {
+                    const results = await Promise.race([
+                        Promise.all([
+                            activeGroup.bridge.player.doGetVolume(),
+                            activeGroup.bridge.player.doGetMediaInfo()
+                        ]),
+                        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 1200))
+                    ]);
+                    volume = results[0].level;
+                    mediaInfo = results[1];
+                } catch(e) {}
+            }
+
+            return {
+                name: g.name,
+                udn: activeGroup ? activeGroup.bridge.udn : null,
+                coordinatorUdn: g.coordinatorUdn,
+                memberUdns: g.memberUdns,
+                online: !!activeGroup,
+                port: activeGroup ? activeGroup.port : null,
+                volume,
+                mediaInfo
+            };
+        });
+
+        Promise.all([Promise.all(devicePromises), Promise.all(groupPromises)]).then(([devices, groups]) => {
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ devices, groups }));
         }).catch(err => {
@@ -470,6 +505,80 @@ const server = http.createServer(async (req, res) => {
 
                 res.writeHead(404, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify({ error: 'Device or group not found' }));
+            } catch (err) {
+                res.writeHead(500, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: err.message }));
+            }
+        });
+    } else if (parsedUrl.pathname === '/api/control' && req.method === 'POST') {
+        let body = '';
+        req.on('data', chunk => { body += chunk; });
+        req.on('end', async () => {
+            try {
+                const payload = JSON.parse(body);
+                const { udn, action, value } = payload;
+                if (!udn || !action) {
+                    res.writeHead(400, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ error: 'Missing required parameters' }));
+                    return;
+                }
+
+                let targetPlayer = null;
+
+                const bridge = activeBridges.get(udn);
+                if (bridge) {
+                    targetPlayer = bridge.player;
+                } else {
+                    for (const groupObj of activeGroups.values()) {
+                        if (groupObj.bridge.udn === udn || groupObj.config.name === udn) {
+                            targetPlayer = groupObj.bridge.player;
+                            break;
+                        }
+                    }
+                }
+
+                if (!targetPlayer) {
+                    res.writeHead(404, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ error: 'Speaker or group not found' }));
+                    return;
+                }
+
+                console.log(`[API Control] Action "${action}" triggered for player "${targetPlayer.name}"`);
+
+                let success = false;
+                switch (action) {
+                    case 'play':
+                        success = await targetPlayer.doResume();
+                        break;
+                    case 'pause':
+                        success = await targetPlayer.doPause();
+                        break;
+                    case 'stop':
+                        success = await targetPlayer.doStop();
+                        break;
+                    case 'next':
+                        success = await targetPlayer.skipNext();
+                        break;
+                    case 'previous':
+                        success = await targetPlayer.skipPrevious();
+                        break;
+                    case 'seek':
+                        if (value !== undefined) {
+                            success = await targetPlayer.doSeek(parseInt(value, 10));
+                        } else {
+                            res.writeHead(400, { 'Content-Type': 'application/json' });
+                            res.end(JSON.stringify({ error: 'Seek value required' }));
+                            return;
+                        }
+                        break;
+                    default:
+                        res.writeHead(400, { 'Content-Type': 'application/json' });
+                        res.end(JSON.stringify({ error: `Unsupported action: ${action}` }));
+                        return;
+                }
+
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ success }));
             } catch (err) {
                 res.writeHead(500, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify({ error: err.message }));
