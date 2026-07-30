@@ -652,6 +652,9 @@ class SonosRendererBridge {
                 screenName: friendlyName
             },
             port: receiverPort,
+            dial: {
+                port: receiverPort
+            },
             dataStore: this.dataStore
         });
 
