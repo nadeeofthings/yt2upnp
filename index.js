@@ -4,7 +4,7 @@ const { SonosRendererBridge } = require('./renderer');
 const { Client } = require('node-ssdp');
 const axios = require('axios');
 const os = require('os');
-const { exec } = require('child_process');
+const { exec, execFile } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
@@ -211,6 +211,21 @@ async function checkAndApplyGroupingsForDevice(udn, bridge) {
 // Stream URL cache
 const urlCache = new Map(); // videoId -> { url, expiresAt }
 
+// Periodic cache cleanup every 10 minutes to prevent memory accumulation
+setInterval(() => {
+    const now = Date.now();
+    for (const [key, value] of urlCache.entries()) {
+        if (value.expiresAt <= now) {
+            urlCache.delete(key);
+        }
+    }
+}, 10 * 60 * 1000);
+
+// Status API response cache (1.5 seconds TTL) to reduce SOAP HTTP request spam on speakers
+let statusCache = null;
+let statusCacheTime = 0;
+const STATUS_CACHE_TTL = 1500;
+
 async function getYouTubeStreamUrl(videoId) {
     const cached = urlCache.get(videoId);
     if (cached && cached.expiresAt > Date.now()) {
@@ -220,9 +235,8 @@ async function getYouTubeStreamUrl(videoId) {
 
     console.log(`[System] Resolving stream URL for video ${videoId} using yt-dlp...`);
     return new Promise((resolve, reject) => {
-        // -g: print URL, -f bestaudio: grab best audio stream (favoring m4a AAC)
-        const command = `yt-dlp -g -f "bestaudio[ext=m4a]/bestaudio" "https://www.youtube.com/watch?v=${videoId}"`;
-        exec(command, (err, stdout, stderr) => {
+        const args = ['--no-playlist', '--flat-playlist', '-g', '-f', 'bestaudio[ext=m4a]/bestaudio', `https://www.youtube.com/watch?v=${videoId}`];
+        execFile('yt-dlp', args, (err, stdout, stderr) => {
             if (err) {
                 console.error(`[yt-dlp] Error resolving stream URL for ${videoId}:`, stderr);
                 reject(err);
@@ -310,6 +324,12 @@ const server = http.createServer(async (req, res) => {
             if (response.headers['accept-ranges']) replyHeaders['accept-ranges'] = response.headers['accept-ranges'];
 
             res.writeHead(response.status, replyHeaders);
+
+            response.data.on('error', (err) => {
+                console.error(`[Proxy] Stream error for video ${videoId}:`, err.message);
+                response.data.destroy();
+            });
+
             response.data.pipe(res);
 
             // Handle client socket abort/close
@@ -338,6 +358,13 @@ const server = http.createServer(async (req, res) => {
             }
         });
     } else if (parsedUrl.pathname === '/api/status') {
+        const now = Date.now();
+        if (statusCache && (now - statusCacheTime < STATUS_CACHE_TTL)) {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(statusCache);
+            return;
+        }
+
         // Return status of all devices and groups
         const devicePromises = Array.from(activeBridges.entries()).map(async ([udn, bridge]) => {
             let role = 'standalone';
@@ -421,8 +448,11 @@ const server = http.createServer(async (req, res) => {
         });
 
         Promise.all([Promise.all(devicePromises), Promise.all(groupPromises)]).then(([devices, groups]) => {
+            const payload = JSON.stringify({ devices, groups });
+            statusCache = payload;
+            statusCacheTime = Date.now();
             res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ devices, groups }));
+            res.end(payload);
         }).catch(err => {
             res.writeHead(500, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: err.message }));
@@ -599,6 +629,9 @@ const processedLocations = new Set(); // Keep track of locations currently being
 
 async function handleDevice(location) {
     if (processedLocations.has(location)) return;
+    for (const bridge of activeBridges.values()) {
+        if (bridge.deviceUrl === location) return;
+    }
     processedLocations.add(location);
 
     try {
@@ -776,4 +809,12 @@ process.on('SIGTERM', async () => {
         console.log('[System] Proxy server closed. Exiting.');
         process.exit(0);
     });
+});
+
+process.on('uncaughtException', (err) => {
+    console.error('[System] Uncaught Exception:', err);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('[System] Unhandled Rejection at:', promise, 'reason:', reason);
 });

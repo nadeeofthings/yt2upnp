@@ -40,15 +40,18 @@ DeviceClient.prototype.getDeviceDescription = function(callback) {
               ]);
 
               const id = tmp.serviceId;
-              if (id && !desc.services[id]) {
-                delete tmp.serviceId;
-                // Make URLs absolute
-                tmp.SCPDURL = buildAbsoluteUrl(baseUrl, tmp.SCPDURL);
-                tmp.controlURL = buildAbsoluteUrl(baseUrl, tmp.controlURL);
-                tmp.eventSubURL = buildAbsoluteUrl(baseUrl, tmp.eventSubURL);
+              if (id) {
+                desc.services = desc.services || {};
+                if (!desc.services[id]) {
+                  delete tmp.serviceId;
+                  // Make URLs absolute
+                  tmp.SCPDURL = buildAbsoluteUrl(baseUrl, tmp.SCPDURL);
+                  tmp.controlURL = buildAbsoluteUrl(baseUrl, tmp.controlURL);
+                  tmp.eventSubURL = buildAbsoluteUrl(baseUrl, tmp.eventSubURL);
 
-                desc.services[id] = tmp;
-                console.log(`[Patch] Added nested service: ${id}`);
+                  desc.services[id] = tmp;
+                  console.log(`[Patch] Added nested service: ${id}`);
+                }
               }
             });
 
@@ -243,6 +246,21 @@ class SonosPlayer extends Player {
         this.groupClients = groupClients; // Array of MediaRendererClient instances for group members
         this.isLoading = false;
         this.isExplicitStop = false;
+
+        // Handle client/UPnP errors to prevent process crashes
+        this.client.on('error', (err) => {
+            console.error(`[Player:${this.name}] UPnP client error:`, err.message || err);
+        });
+
+        if (this.groupClients && Array.isArray(this.groupClients)) {
+            this.groupClients.forEach(client => {
+                if (client.listeners && client.listeners('error').length === 0) {
+                    client.on('error', (err) => {
+                        console.error(`[Player:${this.name} GroupMember] UPnP client error:`, err.message || err);
+                    });
+                }
+            });
+        }
 
         // Set up event listeners from the Sonos UPnP client to sync state with YouTube
 
@@ -614,6 +632,11 @@ class SonosRendererBridge {
         // Initialize the MediaRendererClient
         this.upnpClient = new MediaRendererClient(deviceUrl);
         
+        // Handle client/UPnP errors to prevent process crashes
+        this.upnpClient.on('error', (err) => {
+            console.error(`[Bridge:${friendlyName}] UPnP client error:`, err.message || err);
+        });
+
         // Initialize the Player
         this.player = new SonosPlayer(this.upnpClient, friendlyName, proxyUrlBase, groupClients);
         
@@ -630,6 +653,11 @@ class SonosRendererBridge {
             },
             port: receiverPort,
             dataStore: this.dataStore
+        });
+
+        // Handle receiver errors to prevent process crashes
+        this.receiver.on('error', (err) => {
+            console.error(`[Bridge:${friendlyName}] YouTube Cast Receiver error:`, err.message || err);
         });
         
         this.receiver.on('senderConnect', (sender) => {
