@@ -689,14 +689,19 @@ async function handleDevice(location) {
         
         // Create the bridge
         const bridge = new SonosRendererBridge(location, friendlyName, udn, PROXY_URL_BASE, receiverPort);
-        activeBridges.set(udn, bridge);
         
-        // Start the bridge
-        await bridge.start();
-        console.log(`[Discovery] Bridge for "${friendlyName}" started successfully!`);
+        try {
+            // Start the bridge
+            await bridge.start();
+            activeBridges.set(udn, bridge);
+            console.log(`[Discovery] Bridge for "${friendlyName}" started successfully!`);
 
-        // Check if we need to apply groupings to this new device
-        await checkAndApplyGroupingsForDevice(udn, bridge);
+            // Check if we need to apply groupings to this new device
+            await checkAndApplyGroupingsForDevice(udn, bridge);
+        } catch (startErr) {
+            console.error(`[Discovery] Failed to start bridge for "${friendlyName}":`, startErr.message);
+            try { await bridge.stop(); } catch (e) {}
+        }
     } catch (err) {
         console.error(`[Discovery] Error handling device description from ${location}:`, err.message);
     } finally {
