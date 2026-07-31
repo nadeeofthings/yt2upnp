@@ -246,6 +246,7 @@ class SonosPlayer extends Player {
         this.groupClients = groupClients; // Array of MediaRendererClient instances for group members
         this.isLoading = false;
         this.isExplicitStop = false;
+        this.isPlayingTrack = false;
 
         // Handle client/UPnP errors to prevent process crashes
         this.client.on('error', (err) => {
@@ -268,11 +269,13 @@ class SonosPlayer extends Player {
         this.client.on('playing', () => {
             console.log(`[Player:${this.name}] UPnP playing event received`);
             this.isLoading = false;
+            this.isPlayingTrack = true;
             this.notifyPlayed();
         });
 
         this.client.on('paused', () => {
             console.log(`[Player:${this.name}] UPnP paused event received`);
+            this.isPlayingTrack = false;
             this.notifyPaused();
         });
 
@@ -282,6 +285,13 @@ class SonosPlayer extends Player {
                 console.log(`[Player:${this.name}] Ignoring stopped event during load transition`);
                 return;
             }
+
+            if (!this.isPlayingTrack) {
+                console.log(`[Player:${this.name}] Player is already stopped. Ignoring duplicate UPnP stopped event.`);
+                return;
+            }
+
+            this.isPlayingTrack = false;
             this.notifyStopped();
 
             if (this.isExplicitStop) {
@@ -342,6 +352,7 @@ class SonosPlayer extends Player {
         console.log(`[Player:${this.name}] doPlay: videoId=${video.id}, title="${video.title}", startPosition=${position}s`);
         this.isLoading = true;
         this.isExplicitStop = false;
+        this.isPlayingTrack = true;
         this.notifyLoading();
 
         // Construct the stream URL pointing to our HTTP proxy
@@ -386,6 +397,7 @@ class SonosPlayer extends Player {
     async doPause() {
         console.log(`[Player:${this.name}] doPause`);
         this.isExplicitStop = true;
+        this.isPlayingTrack = false;
         return new Promise((resolve) => {
             this.client.pause((err) => {
                 if (err) {
