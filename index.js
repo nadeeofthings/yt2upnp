@@ -34,10 +34,44 @@ console.log(`[System] Server IP address set to: ${SERVER_IP}`);
 console.log(`[System] Proxy base URL set to: ${PROXY_URL_BASE}`);
 
 const GROUPS_FILE = path.join(__dirname, 'data', 'groups.json');
+const DEVICES_FILE = path.join(__dirname, 'data', 'devices.json');
 let savedGroups = [];
+let savedDevices = []; // [{ udn, friendlyName, customName, location, receiverPort }]
 const activeGroups = new Map(); // groupName -> { config, bridge, port }
 const activeBridges = new Map(); // UDN -> SonosRendererBridge instance
 let nextAvailablePort = RECEIVER_PORT_START;
+
+function loadDevices() {
+    try {
+        if (fs.existsSync(DEVICES_FILE)) {
+            savedDevices = JSON.parse(fs.readFileSync(DEVICES_FILE, 'utf8'));
+            console.log(`[Devices] Loaded ${savedDevices.length} saved devices from configuration.`);
+            for (const dev of savedDevices) {
+                if (dev.receiverPort && dev.receiverPort >= nextAvailablePort) {
+                    nextAvailablePort = dev.receiverPort + 1;
+                }
+            }
+        }
+    } catch (err) {
+        console.error('[Devices] Error loading devices.json:', err.message);
+        savedDevices = [];
+    }
+}
+
+function saveDevices() {
+    try {
+        const dir = path.dirname(DEVICES_FILE);
+        if (!fs.existsSync(dir)) {
+            fs.mkdirSync(dir, { recursive: true });
+        }
+        fs.writeFileSync(DEVICES_FILE, JSON.stringify(savedDevices, null, 2), 'utf8');
+        console.log('[Devices] Saved device configuration.');
+    } catch (err) {
+        console.error('[Devices] Error saving devices.json:', err.message);
+    }
+}
+
+loadDevices();
 
 function loadGroups() {
     try {
@@ -65,6 +99,25 @@ function saveGroups() {
 }
 
 loadGroups();
+
+async function startSavedDevices() {
+    console.log(`[Devices] Restoring ${savedDevices.length} saved speaker bridges...`);
+    for (const dev of savedDevices) {
+        if (activeBridges.has(dev.udn)) continue;
+        const displayName = dev.customName || dev.friendlyName;
+        console.log(`[Devices] Initializing bridge for "${displayName}" at ${dev.location} (Port: ${dev.receiverPort})...`);
+        const bridge = new SonosRendererBridge(dev.location, displayName, dev.udn, PROXY_URL_BASE, dev.receiverPort);
+        try {
+            await bridge.start();
+            activeBridges.set(dev.udn, bridge);
+            console.log(`[Devices] Bridge for "${displayName}" started successfully!`);
+            await checkAndApplyGroupingsForDevice(dev.udn, bridge);
+        } catch (err) {
+            console.error(`[Devices] Could not start bridge for saved speaker "${displayName}" (${dev.location}):`, err.message);
+            try { await bridge.stop(); } catch(e) {}
+        }
+    }
+}
 
 async function createOrUpdateGroup(groupName, coordinatorUdn, memberUdns) {
     console.log(`[Groups] Creating/updating group "${groupName}" with coordinator ${coordinatorUdn} and members:`, memberUdns);
@@ -366,16 +419,19 @@ const server = http.createServer(async (req, res) => {
         }
 
         // Return status of all devices and groups
-        const devicePromises = Array.from(activeBridges.entries()).map(async ([udn, bridge]) => {
+        const devicePromises = savedDevices.map(async (dev) => {
+            const bridge = activeBridges.get(dev.udn);
+            const displayName = dev.customName || dev.friendlyName;
+
             let role = 'standalone';
             let activeGroupName = null;
-            
+
             for (const groupConfig of savedGroups) {
-                if (groupConfig.coordinatorUdn === udn) {
+                if (groupConfig.coordinatorUdn === dev.udn) {
                     role = 'coordinator';
                     activeGroupName = groupConfig.name;
                     break;
-                } else if (groupConfig.memberUdns.includes(udn)) {
+                } else if (groupConfig.memberUdns.includes(dev.udn)) {
                     role = 'follower';
                     activeGroupName = groupConfig.name;
                     break;
@@ -384,31 +440,39 @@ const server = http.createServer(async (req, res) => {
 
             let volume = 30;
             let mediaInfo = null;
+            let online = false;
 
-            try {
-                const results = await Promise.race([
-                    Promise.all([
-                        bridge.player.doGetVolume(),
-                        bridge.player.doGetMediaInfo()
-                    ]),
-                    new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 1200))
-                ]);
-                volume = results[0].level;
-                mediaInfo = results[1];
-            } catch(e) {
+            if (bridge) {
+                online = true;
                 try {
-                    const volObj = await Promise.race([
-                        bridge.player.doGetVolume(),
-                        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 500))
+                    const results = await Promise.race([
+                        Promise.all([
+                            bridge.player.doGetVolume(),
+                            bridge.player.doGetMediaInfo()
+                        ]),
+                        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 1200))
                     ]);
-                    volume = volObj.level;
-                } catch(ve) {}
+                    volume = results[0].level;
+                    mediaInfo = results[1];
+                } catch(e) {
+                    try {
+                        const volObj = await Promise.race([
+                            bridge.player.doGetVolume(),
+                            new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 500))
+                        ]);
+                        volume = volObj.level;
+                    } catch(ve) {}
+                }
             }
 
             return {
-                udn,
-                friendlyName: bridge.friendlyName,
-                location: bridge.deviceUrl,
+                udn: dev.udn,
+                friendlyName: displayName,
+                rawFriendlyName: dev.friendlyName,
+                customName: dev.customName || null,
+                location: dev.location,
+                port: dev.receiverPort,
+                online,
                 role,
                 activeGroupName,
                 volume,
@@ -448,7 +512,7 @@ const server = http.createServer(async (req, res) => {
         });
 
         Promise.all([Promise.all(devicePromises), Promise.all(groupPromises)]).then(([devices, groups]) => {
-            const payload = JSON.stringify({ devices, groups });
+            const payload = JSON.stringify({ devices, groups, isScanning });
             statusCache = payload;
             statusCacheTime = Date.now();
             res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -457,6 +521,89 @@ const server = http.createServer(async (req, res) => {
             res.writeHead(500, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: err.message }));
         });
+    } else if (parsedUrl.pathname === '/api/scan' && req.method === 'POST') {
+        startScan(10000);
+        statusCache = null;
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, message: 'SSDP discovery scan started for 10 seconds' }));
+    } else if (parsedUrl.pathname === '/api/devices/rename' && req.method === 'POST') {
+        let body = '';
+        req.on('data', chunk => { body += chunk; });
+        req.on('end', async () => {
+            try {
+                const payload = JSON.parse(body);
+                const { udn, customName } = payload;
+                if (!udn) {
+                    res.writeHead(400, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ error: 'Missing UDN' }));
+                    return;
+                }
+
+                const savedDev = savedDevices.find(d => d.udn === udn);
+                if (!savedDev) {
+                    res.writeHead(404, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ error: 'Device not found in configuration' }));
+                    return;
+                }
+
+                const newCustomName = customName && customName.trim() ? customName.trim() : null;
+                savedDev.customName = newCustomName;
+                saveDevices();
+
+                const displayName = newCustomName || savedDev.friendlyName;
+                console.log(`[Devices] Renamed device UDN "${udn}" to "${displayName}"`);
+
+                const activeBridge = activeBridges.get(udn);
+                if (activeBridge) {
+                    console.log(`[Devices] Restarting bridge for "${udn}" to apply new display name...`);
+                    try { await activeBridge.stop(); } catch(e) {}
+                    activeBridges.delete(udn);
+
+                    const newBridge = new SonosRendererBridge(
+                        savedDev.location,
+                        displayName,
+                        udn,
+                        PROXY_URL_BASE,
+                        savedDev.receiverPort
+                    );
+                    await newBridge.start();
+                    activeBridges.set(udn, newBridge);
+                }
+
+                statusCache = null;
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ success: true, displayName }));
+            } catch (err) {
+                res.writeHead(500, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: err.message }));
+            }
+        });
+    } else if (parsedUrl.pathname === '/api/devices' && req.method === 'DELETE') {
+        const udn = parsedUrl.searchParams.get('udn');
+        if (!udn) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Missing UDN parameter' }));
+            return;
+        }
+
+        try {
+            savedDevices = savedDevices.filter(d => d.udn !== udn);
+            saveDevices();
+
+            const activeBridge = activeBridges.get(udn);
+            if (activeBridge) {
+                console.log(`[Devices] Removing active bridge for "${activeBridge.friendlyName}"...`);
+                try { await activeBridge.stop(); } catch(e) {}
+                activeBridges.delete(udn);
+            }
+
+            statusCache = null;
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: true }));
+        } catch (err) {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: err.message }));
+        }
     } else if (parsedUrl.pathname === '/api/groups' && req.method === 'POST') {
         let body = '';
         req.on('data', chunk => { body += chunk; });
@@ -654,70 +801,80 @@ async function handleDevice(location) {
         // Clean model name (e.g. "Sonos Play:3" -> "Sonos Play 3")
         const cleanModelName = modelName.replace(/:/g, ' ');
 
-        let friendlyName;
+        let rawFriendlyName;
         if (cleanModelName && roomName) {
-            friendlyName = `${cleanModelName}: ${roomName}`;
+            rawFriendlyName = `${cleanModelName}: ${roomName}`;
         } else {
-            friendlyName = roomName || (friendlyNameMatch ? friendlyNameMatch[1] : '');
+            rawFriendlyName = roomName || (friendlyNameMatch ? friendlyNameMatch[1] : '');
         }
 
-        console.log(`[Discovery] Fetched description XML. Parsed: name="${friendlyName}", type="${deviceType}", udn="${udn}"`);
+        console.log(`[Discovery] Fetched description XML. Parsed: name="${rawFriendlyName}", type="${deviceType}", udn="${udn}"`);
 
         // We care about MediaRenderer and Sonos ZonePlayer devices
         if (!deviceType.includes('MediaRenderer') && !deviceType.includes('ZonePlayer')) {
-            console.log(`[Discovery] Ignoring device "${friendlyName}" because deviceType "${deviceType}" is not a MediaRenderer or ZonePlayer.`);
+            console.log(`[Discovery] Ignoring device "${rawFriendlyName}" because deviceType "${deviceType}" is not a MediaRenderer or ZonePlayer.`);
             processedLocations.delete(location);
             return;
         }
 
-
-        if (!udn || !friendlyName) {
+        if (!udn || !rawFriendlyName) {
             processedLocations.delete(location);
             return;
         }
 
-        if (activeBridges.has(udn)) {
-            // Already bridged
-            processedLocations.delete(location);
-            return;
+        // Check if device is already saved in devices.json
+        let savedDev = savedDevices.find(d => d.udn === udn);
+        let receiverPort;
+
+        if (savedDev) {
+            savedDev.friendlyName = rawFriendlyName;
+            if (savedDev.location !== location) {
+                console.log(`[Discovery] Updated IP location for existing device "${savedDev.customName || rawFriendlyName}" to ${location}`);
+                savedDev.location = location;
+            }
+            receiverPort = savedDev.receiverPort;
+            saveDevices();
+
+            if (activeBridges.has(udn)) {
+                const existingBridge = activeBridges.get(udn);
+                existingBridge.deviceUrl = location;
+                processedLocations.delete(location);
+                return;
+            }
+        } else {
+            receiverPort = nextAvailablePort++;
+            savedDev = {
+                udn,
+                friendlyName: rawFriendlyName,
+                customName: null,
+                location,
+                receiverPort
+            };
+            savedDevices.push(savedDev);
+            saveDevices();
+            console.log(`[Discovery] Saved new device "${rawFriendlyName}" to configuration (Port: ${receiverPort})`);
         }
 
-        console.log(`[Discovery] Discovered new MediaRenderer: "${friendlyName}" at ${location} (UDN: ${udn})`);
-        
-        // Allocate a unique port for this speaker's YouTube Cast Receiver
-        const receiverPort = nextAvailablePort++;
-        
+        const displayName = savedDev.customName || rawFriendlyName;
+        console.log(`[Discovery] Discovered MediaRenderer: "${displayName}" at ${location} (UDN: ${udn})`);
+
         // Create the bridge
-        const bridge = new SonosRendererBridge(location, friendlyName, udn, PROXY_URL_BASE, receiverPort);
-        
+        const bridge = new SonosRendererBridge(location, displayName, udn, PROXY_URL_BASE, receiverPort);
+
         try {
-            // Start the bridge
             await bridge.start();
             activeBridges.set(udn, bridge);
-            console.log(`[Discovery] Bridge for "${friendlyName}" started successfully!`);
+            console.log(`[Discovery] Bridge for "${displayName}" started successfully!`);
 
-            // Check if we need to apply groupings to this new device
             await checkAndApplyGroupingsForDevice(udn, bridge);
         } catch (startErr) {
-            console.error(`[Discovery] Failed to start bridge for "${friendlyName}":`, startErr.message);
+            console.error(`[Discovery] Failed to start bridge for "${displayName}":`, startErr.message);
             try { await bridge.stop(); } catch (e) {}
         }
     } catch (err) {
         console.error(`[Discovery] Error handling device description from ${location}:`, err.message);
     } finally {
         processedLocations.delete(location);
-    }
-}
-
-function handleDeviceBye(usn) {
-    for (const [udn, bridge] of activeBridges.entries()) {
-        if (usn.includes(udn)) {
-            console.log(`[Discovery] Device offline notification for "${bridge.friendlyName}" (UDN: ${udn})`);
-            bridge.stop().then(() => {
-                activeBridges.delete(udn);
-            });
-            break;
-        }
     }
 }
 
@@ -750,7 +907,6 @@ if (serverInterface) {
 
 const ssdpClient = new Client(clientOptions);
 
-
 ssdpClient.on('response', (headers, statusCode, rinfo) => {
     if (headers.LOCATION) {
         console.log(`[Discovery] Received SSDP search response from ${rinfo.address} (${headers.LOCATION})`);
@@ -759,27 +915,41 @@ ssdpClient.on('response', (headers, statusCode, rinfo) => {
 });
 
 ssdpClient.on('notify', (headers) => {
-    console.log(`[Discovery] Received SSDP notify NT=${headers.NT} NTS=${headers.NTS}`);
-    if (headers.NT === RENDERER_ST) {
-        if (headers.NTS === 'ssdp:alive' && headers.LOCATION) {
-            console.log(`[Discovery] Device alive notify from: ${headers.LOCATION}`);
-            handleDevice(headers.LOCATION);
-        } else if (headers.NTS === 'ssdp:byebye' && headers.USN) {
-            handleDeviceBye(headers.USN);
-        }
+    if (headers.NT === RENDERER_ST && headers.NTS === 'ssdp:alive' && headers.LOCATION) {
+        console.log(`[Discovery] Device alive notify from: ${headers.LOCATION}`);
+        handleDevice(headers.LOCATION);
     }
 });
 
+// Manual SSDP discovery scan controller
+let isScanning = false;
+let scanTimeout = null;
 
-// Perform initial search
-console.log(`[Discovery] Starting SSDP discovery for ${RENDERER_ST}...`);
-ssdpClient.search(RENDERER_ST);
+function startScan(durationMs = 10000) {
+    if (isScanning) return;
+    isScanning = true;
+    console.log(`[Discovery] Starting active SSDP discovery scan for ${durationMs / 1000}s...`);
+    try {
+        ssdpClient.search(RENDERER_ST);
+    } catch (e) {
+        console.error('[Discovery] Error starting SSDP search:', e.message);
+    }
 
-// Search periodically every 60 seconds to find any newly connected devices
-setInterval(() => {
-    console.log('[Discovery] Performing periodic SSDP search...');
-    ssdpClient.search(RENDERER_ST);
-}, 60000);
+    if (scanTimeout) clearTimeout(scanTimeout);
+    scanTimeout = setTimeout(() => {
+        isScanning = false;
+        console.log('[Discovery] Active SSDP discovery scan completed.');
+    }, durationMs);
+}
+
+// Perform startup restoration and initial discovery if needed
+(async () => {
+    await startSavedDevices();
+    if (savedDevices.length === 0) {
+        console.log('[Discovery] No saved devices found in configuration. Triggering initial 10s discovery scan...');
+        startScan(10000);
+    }
+})();
 
 // Graceful shutdown handling
 process.on('SIGINT', async () => {

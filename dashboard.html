@@ -667,17 +667,55 @@
             opacity: 1;
             transform: translateY(0);
         }
+
+        .btn-icon {
+            background: transparent;
+            border: 1px solid var(--border);
+            color: var(--text-muted);
+            padding: 0.3rem 0.5rem;
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            font-size: 0.85rem;
+            transition: var(--transition);
+        }
+
+        .btn-icon:hover {
+            border-color: var(--primary);
+            color: var(--text-main);
+            background: rgba(139, 92, 246, 0.1);
+        }
+
+        .btn-danger-icon:hover {
+            border-color: #ef4444;
+            color: #ef4444;
+            background: rgba(239, 68, 68, 0.1);
+        }
+
+        .raw-name {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            font-weight: 400;
+            margin-left: 0.3rem;
+        }
     </style>
 </head>
 <body>
     <header>
         <div class="logo-section">
-            <h1>yt2upnp <span class="logo-badge">V1.1</span></h1>
+            <h1>yt2upnp <span class="logo-badge">V1.2</span></h1>
             <p>Sonos &amp; UPnP YouTube Music Audio Bridge</p>
         </div>
-        <div class="system-status">
-            <div class="status-dot"></div>
-            <span>SSDP Active</span>
+        <div style="display: flex; align-items: center; gap: 1rem;">
+            <button id="scan-btn" class="btn btn-primary" onclick="triggerScan()" style="padding: 0.5rem 1rem; font-size: 0.85rem; display: flex; align-items: center; gap: 0.4rem;">
+                <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                    <path d="M21.5 2v6h-6M2.13 15.57a10 10 0 1 0 3.87-10.84L2 8"></path>
+                </svg>
+                <span id="scan-btn-text">Scan for Speakers</span>
+            </button>
+            <div class="system-status">
+                <div class="status-dot"></div>
+                <span id="status-label">SSDP Ready</span>
+            </div>
         </div>
     </header>
 
@@ -874,7 +912,7 @@
         function renderSpeakers() {
             const listContainer = document.getElementById('speaker-list');
             if (devicesData.length === 0) {
-                listContainer.innerHTML = '<div class="empty-state">No Sonos or UPnP speakers discovered yet.</div>';
+                listContainer.innerHTML = '<div class="empty-state">No Sonos or UPnP speakers configured yet. Click "Scan for Speakers" to discover.</div>';
                 return;
             }
 
@@ -895,14 +933,26 @@
                     roleLabel = `Follower: ${device.activeGroupName}`;
                 }
 
+                const displayName = device.friendlyName;
+                const subNameHtml = device.customName ? `<span class="raw-name">(${device.rawFriendlyName})</span>` : '';
+                const onlineHtml = device.online ? 
+                    '<span style="color: var(--success); font-weight: 500;">Online</span>' : 
+                    '<span style="color: var(--text-disabled); font-weight: 500;">Offline</span>';
+
+                const safeNameForJs = (displayName || '').replace(/'/g, "\\'");
+
                 html += `
                     <div class="${cardClass}" id="card-${device.udn}">
                         <div class="speaker-header">
                             <div class="speaker-info">
-                                <h3>${device.friendlyName}</h3>
-                                <p>${device.udn.replace('uuid:', '')}</p>
+                                <h3>${displayName} ${subNameHtml}</h3>
+                                <p style="margin-top: 0.2rem;">Cast Port: ${device.port || 'N/A'} • ${onlineHtml}</p>
                             </div>
-                            <span class="speaker-badge ${badgeClass}">${roleLabel}</span>
+                            <div style="display: flex; align-items: center; gap: 0.4rem;">
+                                <span class="speaker-badge ${badgeClass}">${roleLabel}</span>
+                                <button class="btn-icon" title="Rename Speaker" onclick="renameSpeaker('${device.udn}', '${safeNameForJs}')">✏️</button>
+                                <button class="btn-icon btn-danger-icon" title="Remove Speaker" onclick="removeSpeaker('${device.udn}', '${safeNameForJs}')">🗑️</button>
+                            </div>
                         </div>
                         
                         <!-- Now Playing Metadata & Controls -->
@@ -925,6 +975,65 @@
                 `;
             });
             listContainer.innerHTML = html;
+        }
+
+        async function triggerScan() {
+            const btn = document.getElementById('scan-btn');
+            const btnText = document.getElementById('scan-btn-text');
+            const statusLabel = document.getElementById('status-label');
+
+            btn.disabled = true;
+            btnText.innerText = 'Scanning (10s)...';
+            if (statusLabel) statusLabel.innerText = 'Scanning...';
+
+            showToast('Started 10-second SSDP discovery scan...');
+
+            try {
+                await fetch('/api/scan', { method: 'POST' });
+            } catch (e) {
+                console.error('Scan error:', e);
+            }
+
+            setTimeout(() => {
+                btn.disabled = false;
+                btnText.innerText = 'Scan for Speakers';
+                if (statusLabel) statusLabel.innerText = 'SSDP Ready';
+                fetchStatus();
+            }, 10500);
+        }
+
+        async function renameSpeaker(udn, currentName) {
+            const newName = prompt(`Enter custom display name for "${currentName}":\n(Leave blank to reset to original name)`, currentName);
+            if (newName === null) return;
+
+            try {
+                const response = await fetch('/api/devices/rename', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ udn, customName: newName })
+                });
+                if (!response.ok) throw new Error('Rename failed');
+                const data = await response.json();
+                showToast(`Renamed speaker to "${data.displayName}"`);
+                fetchStatus();
+            } catch (err) {
+                showToast(`Error renaming speaker: ${err.message}`);
+            }
+        }
+
+        async function removeSpeaker(udn, name) {
+            if (!confirm(`Are you sure you want to remove "${name}" from remembered speakers?`)) return;
+
+            try {
+                const response = await fetch(`/api/devices?udn=${encodeURIComponent(udn)}`, {
+                    method: 'DELETE'
+                });
+                if (!response.ok) throw new Error('Remove failed');
+                showToast(`Removed "${name}" from configuration.`);
+                fetchStatus();
+            } catch (err) {
+                showToast(`Error removing speaker: ${err.message}`);
+            }
         }
 
         function updateVolumeText(udn, value) {
