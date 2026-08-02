@@ -282,7 +282,6 @@ const STATUS_CACHE_TTL = 1500;
 async function getYouTubeStreamUrl(videoId) {
     const cached = urlCache.get(videoId);
     if (cached && cached.expiresAt > Date.now()) {
-        console.log(`[Cache] Using cached stream URL for video ${videoId}`);
         return cached.url;
     }
 
@@ -326,8 +325,6 @@ proxy.on('error', (err, req, res) => {
 });
 
 proxy.on('proxyRes', (proxyRes, req, res) => {
-    console.log(`[Proxy] YouTube response: status=${proxyRes.statusCode}, type="${proxyRes.headers['content-type']}", size=${proxyRes.headers['content-length']} bytes`);
-    
     // Force the Content-Type to audio/x-m4a so Sonos recognizes the stream format correctly
     proxyRes.headers['content-type'] = 'audio/x-m4a';
 });
@@ -348,7 +345,11 @@ const server = http.createServer(async (req, res) => {
 
         try {
             const streamUrl = await getYouTubeStreamUrl(videoId);
-            console.log(`[Proxy] Requesting stream for video ${videoId} from YouTube...`);
+
+            // Log once at the start of a track stream (first chunk request)
+            if (!req.headers['range'] || req.headers['range'].startsWith('bytes=0-')) {
+                console.log(`[Proxy] Streaming track videoId=${videoId} to speaker`);
+            }
 
             // Forward Range header if requested by the client (Sonos)
             const forwardHeaders = {
@@ -356,7 +357,6 @@ const server = http.createServer(async (req, res) => {
             };
             if (req.headers['range']) {
                 forwardHeaders['range'] = req.headers['range'];
-                console.log(`[Proxy] Range requested: ${req.headers['range']}`);
             }
 
             const response = await axios({
@@ -366,8 +366,6 @@ const server = http.createServer(async (req, res) => {
                 headers: forwardHeaders,
                 validateStatus: () => true // Allow any status code (like 206, 302, etc.) to pass through
             });
-
-            console.log(`[Proxy] YouTube response: status=${response.status}, type="${response.headers['content-type']}", size=${response.headers['content-length']} bytes`);
 
             // Set reply headers and force audio/x-m4a MIME type
             const replyHeaders = {};

@@ -307,7 +307,6 @@ class SonosPlayer extends Player {
         });
 
         this.client.on('status', (status) => {
-            console.log(`[Player:${this.name}] UPnP status change:`, status);
             // Some renderers don't emit separate events but report state in status
             if (status.TransportState) {
                 const state = status.TransportState;
